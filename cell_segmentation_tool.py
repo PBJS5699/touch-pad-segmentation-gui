@@ -14,10 +14,12 @@ Features:
 import sys
 import os
 from pathlib import Path
+
+SUPPORTED_EXTENSIONS = ('.tif', '.tiff', '.jpg', '.jpeg', '.png', '.webp', '.avif')
 import numpy as np
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QHBoxLayout, QLabel, QPushButton, QFileDialog, 
-                             QComboBox, QSlider, QMessageBox)
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
+                             QHBoxLayout, QLabel, QPushButton, QFileDialog,
+                             QComboBox, QSlider, QMessageBox, QSizePolicy)
 from PyQt5.QtCore import Qt, QPoint, QPointF
 from PyQt5.QtGui import QImage, QPixmap, QPainter, QPen, QColor, QPolygonF
 from skimage import io
@@ -63,6 +65,7 @@ class ImageCanvas(QWidget):
         
         # Minimum size for the canvas
         self.setMinimumSize(800, 600)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
     
     def load_image(self, filepath):
         """Load TIFF image and associated mask file if it exists."""
@@ -233,8 +236,8 @@ class ImageCanvas(QWidget):
         if self.image is None:
             # Display instructions when no image is loaded
             painter.setPen(QColor(200, 200, 200))
-            painter.drawText(self.rect(), Qt.AlignCenter, 
-                           "Drag and drop a TIFF file here\nor use File > Open")
+            painter.drawText(self.rect(), Qt.AlignCenter,
+                           "Drag and drop an image here\nor use File > Open\n(TIFF, JPEG, PNG, WebP, AVIF)")
             return
         
         # Convert numpy image to QImage for display
@@ -588,8 +591,8 @@ class ImageCanvas(QWidget):
             url = event.mimeData().urls()[0]
             filepath = url.toLocalFile()
             
-            # Check if it's a TIFF file
-            if filepath.lower().endswith(('.tif', '.tiff')):
+            # Check if it's a supported image file
+            if filepath.lower().endswith(SUPPORTED_EXTENSIONS):
                 # Save current masks before switching images
                 if self.masks is not None and self.image_path is not None:
                     self.save_masks()
@@ -613,7 +616,7 @@ class MainWindow(QMainWindow):
         self.original_image_data = None
         
         # File navigation
-        self.tiff_files = []  # List of TIFF files in current directory
+        self.image_files = []  # List of image files in current directory
         self.current_file_index = -1  # Index of currently loaded file
         
         self.init_ui()
@@ -692,13 +695,14 @@ class MainWindow(QMainWindow):
         )
         instructions.setStyleSheet("font-size: 8px; color: gray;")
         instructions.setAlignment(Qt.AlignCenter)
+        instructions.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Fixed)
         main_layout.addWidget(instructions)
     
     def open_image_dialog(self):
         """Open file dialog to select a TIFF image."""
         filepath, _ = QFileDialog.getOpenFileName(
-            self, "Open TIFF Image", "", 
-            "TIFF Images (*.tif *.tiff);;All Files (*)"
+            self, "Open Image", "",
+            "Images (*.tif *.tiff *.jpg *.jpeg *.png *.webp *.avif);;All Files (*)"
         )
         
         if filepath:
@@ -778,44 +782,43 @@ class MainWindow(QMainWindow):
         current_path = Path(current_filepath)
         directory = current_path.parent
         
-        # Find all TIFF files in the directory
-        tiff_extensions = ['.tif', '.tiff', '.TIF', '.TIFF']
-        self.tiff_files = []
-        
-        for ext in tiff_extensions:
-            self.tiff_files.extend(directory.glob(f'*{ext}'))
-        
-        # Sort files alphabetically
-        self.tiff_files = sorted(self.tiff_files)
-        
+        # Find all supported image files in the directory
+        self.image_files = []
+        for ext in SUPPORTED_EXTENSIONS:
+            self.image_files.extend(directory.glob(f'*{ext}'))
+            self.image_files.extend(directory.glob(f'*{ext.upper()}'))
+
+        # Sort files alphabetically and deduplicate (case-insensitive FS may double-count)
+        self.image_files = sorted(set(self.image_files))
+
         # Find current file index
         try:
-            self.current_file_index = self.tiff_files.index(current_path)
+            self.current_file_index = self.image_files.index(current_path)
         except ValueError:
             self.current_file_index = -1
-        
-        print(f"Found {len(self.tiff_files)} TIFF files in directory")
+
+        print(f"Found {len(self.image_files)} image files in directory")
         if self.current_file_index >= 0:
-            print(f"Current file: {self.current_file_index + 1}/{len(self.tiff_files)}")
+            print(f"Current file: {self.current_file_index + 1}/{len(self.image_files)}")
     
     def load_previous_file(self):
-        """Load the previous TIFF file in the directory."""
-        if len(self.tiff_files) == 0:
+        """Load the previous image file in the directory."""
+        if len(self.image_files) == 0:
             print("No file list available")
             return
-        
+
         if self.current_file_index <= 0:
             print("Already at first file")
             return
-        
+
         # Save current masks
         if self.canvas.masks is not None and self.canvas.image_path is not None:
             self.canvas.save_masks()
-        
+
         # Load previous file
         self.current_file_index -= 1
-        next_file = str(self.tiff_files[self.current_file_index])
-        print(f"Loading previous file: {self.current_file_index + 1}/{len(self.tiff_files)}")
+        next_file = str(self.image_files[self.current_file_index])
+        print(f"Loading previous file: {self.current_file_index + 1}/{len(self.image_files)}")
         
         # Load the image
         try:
@@ -828,23 +831,23 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Error", f"Failed to load image: {str(e)}")
     
     def load_next_file(self):
-        """Load the next TIFF file in the directory."""
-        if len(self.tiff_files) == 0:
+        """Load the next image file in the directory."""
+        if len(self.image_files) == 0:
             print("No file list available")
             return
-        
-        if self.current_file_index >= len(self.tiff_files) - 1:
+
+        if self.current_file_index >= len(self.image_files) - 1:
             print("Already at last file")
             return
-        
+
         # Save current masks
         if self.canvas.masks is not None and self.canvas.image_path is not None:
             self.canvas.save_masks()
-        
+
         # Load next file
         self.current_file_index += 1
-        next_file = str(self.tiff_files[self.current_file_index])
-        print(f"Loading next file: {self.current_file_index + 1}/{len(self.tiff_files)}")
+        next_file = str(self.image_files[self.current_file_index])
+        print(f"Loading next file: {self.current_file_index + 1}/{len(self.image_files)}")
         
         # Load the image
         try:
